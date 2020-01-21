@@ -63,14 +63,11 @@ func (r *RingNode) Run(wg *sync.WaitGroup) {
 		
 		} else if receivedMessage.isLeader == true { // si le leader est identifié (peut etre remplacé par un else standard)
 			
-			// si l'id recu est égal à celui du noeud courant
-			if receivedMessage.id != r.localId { // si l'id recu n'est pas l'id courant
-				r.leaderId = receivedMessage.id // on met à jour la valeur de leaderId avec l'id recu
-				fmt.Println("From", r.localId, ": Leader found at", r.leaderId, "| spreading message and closing channel")
-				r.outChannel <- receivedMessage // on envoie le message recu au noeud suivant (pas besoin de le modifier)
-				close(r.outChannel) // on ferme la connexion sortante du noeud courant
-			}
-
+			r.leaderId = receivedMessage.id // on met à jour la valeur de leaderId avec l'id recu
+			fmt.Println("From", r.localId, ": Leader found at", r.leaderId, "| spreading message and closing channel")
+			r.outChannel <- receivedMessage // on envoie le message recu au noeud suivant (pas besoin de le modifier)
+			close(r.outChannel) // on ferme la connexion sortante du noeud courant
+		
 		}
 	}
 }
