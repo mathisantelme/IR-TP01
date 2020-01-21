@@ -113,3 +113,7 @@ func main() {
     wg.Wait()
 }
 ```
+
+4. Analyser le nombre de messages envoyés par chaque sommet, quelle solution
+pourriez-vous proposer pour réduire le nombre de messages envoyés ? Vous pouvez
+modifier les structures et le code selon vos besoins.

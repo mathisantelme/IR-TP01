@@ -46,7 +46,7 @@ func (r *RingNode) Run(wg *sync.WaitGroup) {
 		if r.leaderId != 0 {
 			// si le leaderId à été modifié alors le leader à été identifié, on ne fait rien
 			continue
-		} else if receivedMessage.isLeader == false { // si le leader n'as pas encore été idenfié
+		} else if !receivedMessage.isLeader { // si le leader n'as pas encore été idenfié
 			
 			// si l'id recu est l'id du noeud courant
 			if receivedMessage.id == r.localId {
@@ -61,43 +61,44 @@ func (r *RingNode) Run(wg *sync.WaitGroup) {
 				r.outChannel <- Message{max, false} // on renvoie le plus grand id des deux
 			}
 		
-		} else if receivedMessage.isLeader == true { // si le leader est identifié (peut etre remplacé par un else standard)
-			
-			// si l'id recu est égal à celui du noeud courant
-			if receivedMessage.id != r.localId { // si l'id recu n'est pas l'id courant
-				r.leaderId = receivedMessage.id // on met à jour la valeur de leaderId avec l'id recu
-				fmt.Println("From", r.localId, ": Leader found at", r.leaderId, "| spreading message and closing channel")
-				r.outChannel <- receivedMessage // on envoie le message recu au noeud suivant (pas besoin de le modifier)
-				close(r.outChannel) // on ferme la connexion sortante du noeud courant
-			}
+		} else if receivedMessage.isLeader { // si le leader est identifié (peut etre remplacé par un else standard)
+		
+			r.leaderId = receivedMessage.id // on met à jour la valeur de leaderId avec l'id recu
+			fmt.Println("From", r.localId, ": Leader found at", r.leaderId, "| spreading message and closing channel")
+			r.outChannel <- receivedMessage // on envoie le message recu au noeud suivant (pas besoin de le modifier)
+			close(r.outChannel) // on ferme la connexion sortante du noeud courant
 
 		}
 	}
 }
 
 func main() {
+	// TODO: généraliser à N noeud en utilisant une boucle afin de les initialiser
 
-    out1 := make(chan Message, 1)
-    out2 := make(chan Message, 1)
-    out3 := make(chan Message, 1)
-    out4 := make(chan Message, 1)
-    out5 := make(chan Message, 1)
+	const N = 20000000 // défini le nombre de noeuds à créer sur l'anneau
+	var outChannels [N]chan Message  // une slice permettant de stocker les channels utilisés par les noeud de l'anneau
+	var nodes [N]*RingNode // une slice permettant de stocker les noeud de l'anneau
 
-	// On ajoute des nouveaux noeuds et on mélange leurs position sur l'anneau en modifiant les channels d'entrée et de sortie
-    node1 := NewRingNode(1, out4, out1)
-    node2 := NewRingNode(2, out5, out2)
-    node3 := NewRingNode(3, out1, out3)
-    node4 := NewRingNode(4, out2, out4)
-    node5 := NewRingNode(5, out3, out5)
+	var wg sync.WaitGroup
+    wg.Add(N)
 
-    var wg sync.WaitGroup
-    wg.Add(3)
+	// Création des channels
+	for i := range outChannels {
+		outChannels[i] = make(chan Message, 1)
+	}
 
-    go node1.Run(&wg)
-    go node2.Run(&wg)
-	go node3.Run(&wg)
-	go node4.Run(&wg)
-	go node5.Run(&wg)
+	// Création des noeuds
+	for i := 0; i < N; i++ {
+		if i == 0 { // la création du premier noeud utilise le dernier chan en entrée et le premier chan comme sortie (pour fermer l'anneau)
+			nodes[i] = NewRingNode(i + 1, outChannels[N - 1], outChannels[i]) // on ajoute le noeud créé précédement créé
+		} else {
+			nodes[i] = NewRingNode(i + 1, outChannels[i-1], outChannels[i]) // on instancie une instance de RingNode et y lie la channel précédente et la suivante
+		}	
+
+		go nodes[i].Run(&wg)
+	}
+
+	fmt.Println("Initialisation of", N, "node(s)")
 
     wg.Wait()
 }
