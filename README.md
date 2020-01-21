@@ -31,4 +31,50 @@ Les deux différences avec l’exercice de la semaine 1 sont que le message envo
 information (c’est n’est pas juste un jeton) et surtout qu’il y a plusieurs messages en circulation au
 même moment.
 
+## Première Partie
 
+1. A quel moment un sommet peut fermer sa connexion sortante ?
+   
+Un sommet peut fermer sa connexion sortante au moment ou il à envoyé le message indiquant l'identifiant du leader (si il ferme au moment de la réception de l'identifiant du leader, cela bloquerai les sommets suivants en attente du message).
+
+2. Complétez le code fournit pour exécuter l'algorithme sur un anneau à trois sommets (seul le contenu de la boucle doit etre modifiée). Faire un affichage à chaque réception de message et afficher le nombre de messages envoyés.
+
+Si on exécute le code fournit, on se rend compte que l'initialisation des Noeud s'effectue correctement (chaque noeud envoie son id à son voisin), et que les message sont correctement recus (les noeud recoivent les id des noeuds les précédant dans l'anneau). Seulement une fois ces deux étapes effectuées, les goroutines s'attendent mutuellement et créé un [deadlock](https://fr.wikipedia.org/wiki/Interblocage).
+<br></br>
+Afin d'éviter le deadlock, on doit permettre à chaque noeud de comparer l'identifiant recu et son propre id afin de renvoyer l'id le plus élevé. Pour cela on va compléter la boucle `for` présente dans la fonction `Run`.
+
+```go
+for receivedMessage := range r.inChannel {
+    fmt.Println("From", r.localId, ": received", receivedMessage.id, receivedMessage.isLeader)
+
+    if r.leaderId != 0 {
+        // si le leaderId à été modifié alors le leader à été identifié, on ne fait rien
+        continue
+    } else if receivedMessage.isLeader == false { // si le leader n'as pas encore été idenfié
+        
+        // si l'id recu est l'id du noeud courant
+        if receivedMessage.id == r.localId {
+            // si l'id recu est égal à celui du noeud courant alors on viens d'identifier le leader
+            r.leaderId = receivedMessage.id // on met à jour la valeur de l'id du leader
+            fmt.Println("From", r.localId, ": Leader found at", r.leaderId)
+            r.outChannel <- Message{r.leaderId, true} // on envoie un message contenant l'id du leader et on met à jour la valeur isLeader à true
+            close(r.outChannel) // on ferme le channel
+        } else { // si l'id recu n'est pas l'id courant
+            max := Max(r.localId, receivedMessage.id) // on compare les deux id et on renvoie le plus grand des deux
+            fmt.Println("From", r.localId, ": compared (", r.localId, "-", receivedMessage.id, ") | sending:", max) // on affiche un message informatif
+            r.outChannel <- Message{max, false} // on renvoie le plus grand id des deux
+        }
+    
+    } else if receivedMessage.isLeader == true { // si le leader est identifié (peut etre remplacé par un else standard)
+        
+        // si l'id recu est égal à celui du noeud courant
+        if receivedMessage.id != r.localId { // si l'id recu n'est pas l'id courant
+            r.leaderId = receivedMessage.id // on met à jour la valeur de leaderId avec l'id recu
+            fmt.Println("From", r.localId, ": Leader found at", r.leaderId, "| spreading message and closing channel")
+            r.outChannel <- receivedMessage // on envoie le message recu au noeud suivant (pas besoin de le modifier)
+            close(r.outChannel) // on ferme la connexion sortante du noeud courant
+        }
+
+    }
+}
+```
