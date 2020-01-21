@@ -78,3 +78,38 @@ for receivedMessage := range r.inChannel {
     }
 }
 ```
+
+3. Généraliser tout le code pour créer un anneau avec **N** sommets (seul le main doit
+être modifié). Vous pouvez tester des solutions dans lesquelles l’identifiant des sommets est
+différent de leur position sur l’anneau.
+
+Pour cela il suffit de créer des nouveaux noeuds dans le main et d'alterner leurs channel d'entrée et de sortie afin de changer leur position dans l'anneau.
+
+```go
+func main() {
+
+    out1 := make(chan Message, 1)
+    out2 := make(chan Message, 1)
+    out3 := make(chan Message, 1)
+    out4 := make(chan Message, 1)
+    out5 := make(chan Message, 1)
+
+	// On ajoute des nouveaux noeuds et on mélange leurs position sur l'anneau en modifiant les channels d'entrée et de sortie
+    node1 := NewRingNode(1, out4, out1)
+    node2 := NewRingNode(2, out5, out2)
+    node3 := NewRingNode(3, out1, out3)
+    node4 := NewRingNode(4, out2, out4)
+    node5 := NewRingNode(5, out3, out5)
+
+    var wg sync.WaitGroup
+    wg.Add(3)
+
+    go node1.Run(&wg)
+    go node2.Run(&wg)
+	go node3.Run(&wg)
+	go node4.Run(&wg)
+	go node5.Run(&wg)
+
+    wg.Wait()
+}
+```
