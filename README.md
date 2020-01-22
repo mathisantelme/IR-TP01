@@ -83,37 +83,111 @@ for receivedMessage := range r.inChannel {
 être modifié). Vous pouvez tester des solutions dans lesquelles l’identifiant des sommets est
 différent de leur position sur l’anneau.
 
-Pour cela il suffit de créer des nouveaux noeuds dans le main et d'alterner leurs channel d'entrée et de sortie afin de changer leur position dans l'anneau.
+Pour cela on va utiliser trois nouvelles variables, à savoir `outChannels` (array qui permet de stocker les channels utilisés par les noeuds), `nodes` (array qui permet de stocker  les noeud), et `N` (le nombre de noeuds présents sur l'anneau). On va ensuite utiliser une boucle `for` afin d'intialiser les noeuds et lancer les goroutines correspondantes.
+
+Cependant il ne faut pas oublier de lier le premier noeud au dernier et inversement, sinon on n'obtient pas un "anneau".
 
 ```go
 func main() {
 
-    out1 := make(chan Message, 1)
-    out2 := make(chan Message, 1)
-    out3 := make(chan Message, 1)
-    out4 := make(chan Message, 1)
-    out5 := make(chan Message, 1)
+    const N = 200 // défini le nombre de noeuds à créer sur l'anneau
+	var outChannels [N]chan Message  // une slice permettant de stocker les channels utilisés par les noeud de l'anneau
+	var nodes [N]*RingNode // une slice permettant de stocker les noeud de l'anneau
 
-	// On ajoute des nouveaux noeuds et on mélange leurs position sur l'anneau en modifiant les channels d'entrée et de sortie
-    node1 := NewRingNode(1, out4, out1)
-    node2 := NewRingNode(2, out5, out2)
-    node3 := NewRingNode(3, out1, out3)
-    node4 := NewRingNode(4, out2, out4)
-    node5 := NewRingNode(5, out3, out5)
+	var wg sync.WaitGroup
+    wg.Add(N)
 
-    var wg sync.WaitGroup
-    wg.Add(3)
+	// Création des channels
+	for i := range outChannels {
+		outChannels[i] = make(chan Message, 1)
+	}
 
-    go node1.Run(&wg)
-    go node2.Run(&wg)
-	go node3.Run(&wg)
-	go node4.Run(&wg)
-	go node5.Run(&wg)
+	// Création des noeuds
+	for i := 0; i < N; i++ {
+		if i == 0 { // la création du premier noeud utilise le dernier chan en entrée et le premier chan comme sortie (pour fermer l'anneau)
+			nodes[i] = NewRingNode(i + 1, outChannels[N - 1], outChannels[i]) // on ajoute le noeud créé précédement créé
+		} else {
+			nodes[i] = NewRingNode(i + 1, outChannels[i-1], outChannels[i]) // on instancie une instance de RingNode et y lie la channel précédente et la suivante
+		}	
+
+		go nodes[i].Run(&wg)
+	}
+
+	fmt.Println("Initialisation of", N, "node(s)")
 
     wg.Wait()
+
 }
 ```
 
 4. Analyser le nombre de messages envoyés par chaque sommet, quelle solution
 pourriez-vous proposer pour réduire le nombre de messages envoyés ? Vous pouvez
 modifier les structures et le code selon vos besoins.
+
+Afin de réduire le nombre de message, on va simplement empecher les noeuds d'envoyer un message si l'id recu est plus petit que le plus grand id déjà envoyé. Pour cela on va utiliser un nouvel attribut à `RingNode`, `maxId` qui permet de stocker le plus grand id envoyé par un noeud.
+<br></br>
+Ensuite à chaque reception d'un message qui n'est pas un message de leader, les noeud compareront l'id recu et leur `maxId`, si ce dernier est plus grand, alors aucun message ne sera envoyé et inversement.
+
+On obtient donc le code suivant:
+
+```go
+// définition d'une structure de Noeud
+type RingNode struct {
+	inChannel  <-chan Message // la connexion entrante
+	outChannel chan<- Message // la connexion sortante
+	localId    int            // l'id du noeud
+	maxId      int            // l'id maximal enregistré par le noeud
+	leaderId   int            // l'id du leader
+}
+
+func NewRingNode(id int, inChannel <-chan Message, outChannel chan<- Message) *RingNode {
+	return &RingNode{inChannel, outChannel, id, id, 0}
+}
+
+// code principal des noeuds
+func (r *RingNode) Run(wg *sync.WaitGroup) {
+	// Done va etre executée un fois la boucle terminée (le inChannel est fermée)
+	defer wg.Done()
+
+	// Initialisation: chaque Noeud envoie son id au suivant
+	fmt.Println("From", r.localId, ": Sending ", r.localId)
+	r.outChannel <- Message{r.localId, false}
+
+	for receivedMessage := range r.inChannel {
+		fmt.Println("From", r.localId, ": received", receivedMessage.id, receivedMessage.isLeader)
+
+		if r.leaderId != 0 {
+			// si le leaderId à été modifié alors le leader à été identifié, on ne fait rien
+			continue
+		} else if receivedMessage.isLeader == false { // si le leader n'as pas encore été idenfié
+
+			// si l'id recu est l'id du noeud courant
+			if receivedMessage.id == r.localId {
+				// si l'id recu est égal à celui du noeud courant alors on viens d'identifier le leader
+				r.leaderId = receivedMessage.id // on met à jour la valeur de l'id du leader
+				fmt.Println("From", r.localId, ": Leader found at", r.leaderId)
+				r.outChannel <- Message{r.leaderId, true} // on envoie un message contenant l'id du leader et on met à jour la valeur isLeader à true
+				close(r.outChannel)                       // on ferme le channel
+			} else { // si l'id recu n'est pas l'id courant
+				// si l'id recu est plus grand que le plus grand Id envoyé
+				if receivedMessage.id > r.maxId {
+					max := Max(r.localId, receivedMessage.id)                                                               // on compare les deux id et on renvoie le plus grand des deux
+					fmt.Println("From", r.localId, ": compared (", r.localId, "-", receivedMessage.id, ") | sending:", max) // on affiche un message informatif
+					r.outChannel <- Message{max, false}
+				} // on renvoie le plus grand id des deux
+			}
+
+		} else if receivedMessage.isLeader == true { // si le leader est identifié (peut etre remplacé par un else standard)
+
+			r.leaderId = receivedMessage.id // on met à jour la valeur de leaderId avec l'id recu
+			fmt.Println("From", r.localId, ": Leader found at", r.leaderId, "| spreading message and closing channel")
+			r.outChannel <- receivedMessage // on envoie le message recu au noeud suivant (pas besoin de le modifier)
+			close(r.outChannel)             // on ferme la connexion sortante du noeud courant
+
+		}
+	}
+}
+```
+
+Si on veut ajouter un suivi du nombre des messages, il suffit simplement d'intialiser un compteur à 0 juste avant l'appel du main, puis dans la fonction Run, on incrémente ce compteur à chaque message envoyé, puis on affiche la valeur du compteur à la fin du main.
+
